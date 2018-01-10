@@ -9,7 +9,7 @@ namespace LightLDS
     {
         public static void Main(string[] args)
         {
-            Console.WriteLine("Hello World!");
+            Console.WriteLine("Starting light OPC UA Local Discovery Server");
 
             ApplicationInstance application = new ApplicationInstance();
 
@@ -148,7 +148,8 @@ namespace LightLDS
 
                 // start the server.
                 application.Start(server).Wait();
-                
+
+                Console.WriteLine("Running! Press ENTER to exit.");
 
             }
             catch (Exception ex)

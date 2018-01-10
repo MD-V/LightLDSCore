@@ -1,6 +1,7 @@
 ﻿using Opc.Ua;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace LightLDS
@@ -8,49 +9,28 @@ namespace LightLDS
     public class DiscoveryServerInstance : DiscoveryServerBase
     {
 
+        private Dictionary<string, ApplicationDescription> _RegisteredServers = new Dictionary<string, ApplicationDescription>();
+        private object _ServerLock = new object();
+
+
+
         #region IDiscovery
         public override ResponseHeader FindServers(RequestHeader requestHeader, string endpointUrl, StringCollection localeIds, StringCollection serverUris, out ApplicationDescriptionCollection servers)
         {
-
-            var serverDummy = new ApplicationDescriptionCollection(new List<ApplicationDescription>()
+            lock(_ServerLock)
             {
-                new ApplicationDescription()
-                {
-                    ApplicationName = "SoftingOpcUaDemoServer",
-                    ApplicationUri = "opc.tcp://localhost:51510/UA/DemoServer",
-                    ApplicationType = ApplicationType.Server,
-                    ProductUri = "http://industrial.softing.com/OpcUaNetToolkit/OpcUaDemoServer",
-                    DiscoveryUrls = new StringCollection(new List<string>(){
-                            "opc.tcp://localhost:51510/UA/DemoServer"
-                    }
-                    ),
-                },
-                new ApplicationDescription()
-                {
-                    ApplicationName = "SoftingOpcUaDemoServer1",
-                    ApplicationUri = "opc.tcp://localhost:51511/UA/DemoServer1",
-                    ApplicationType = ApplicationType.Server,
-                    ProductUri = "http://industrial.softing.com/OpcUaNetToolkit/OpcUaDemoServer1",
-                    DiscoveryUrls = new StringCollection(new List<string>(){
-                            "opc.tcp://localhost:51511/UA/DemoServer1"
-                    }
-                    ),
-                }
+                servers = new ApplicationDescriptionCollection(_RegisteredServers.Values);
+
+                ResponseHeader responseHeader = new ResponseHeader();
+
+                responseHeader.Timestamp = DateTime.UtcNow;
+                responseHeader.RequestHandle = requestHeader.RequestHandle;
+                responseHeader.ServiceResult = new StatusCode(StatusCodes.Good);
 
 
+                return responseHeader;
+            }
 
-            });
-
-            servers = serverDummy;
-
-            ResponseHeader responseHeader = new ResponseHeader();
-
-            responseHeader.Timestamp = DateTime.UtcNow;
-            responseHeader.RequestHandle = requestHeader.RequestHandle;
-            responseHeader.ServiceResult = new StatusCode(StatusCodes.Good);
-
-
-            return responseHeader;
         }
 
         public override ResponseHeader FindServersOnNetwork(RequestHeader requestHeader, uint startingRecordId, uint maxRecordsToReturn, StringCollection serverCapabilityFilter, out DateTime lastCounterResetTime, out ServerOnNetworkCollection servers)
@@ -96,7 +76,52 @@ namespace LightLDS
 
         public override ResponseHeader RegisterServer(RequestHeader requestHeader, RegisteredServer server)
         {
-            return base.RegisterServer(requestHeader, server);
+
+            lock (_ServerLock)
+            {
+
+                if (server.IsOnline)
+                {
+                    var newServer = new ApplicationDescription()
+                    {
+                        ApplicationName = server.ServerNames.First(),
+                        ApplicationUri = server.ServerUri,
+                        ApplicationType = server.ServerType,
+                        ProductUri = server.ProductUri,
+                        DiscoveryUrls = server.DiscoveryUrls
+                    };
+                           
+
+                    if(_RegisteredServers.ContainsKey(server.ServerUri))
+                    {
+                        _RegisteredServers[server.ServerUri] = newServer;
+                    }
+                    else
+                    {
+                        _RegisteredServers.Add(server.ServerUri, newServer);
+                    }
+
+                    
+                }
+                else
+                {
+                    if (_RegisteredServers.ContainsKey(server.ServerUri))
+                    {
+                        _RegisteredServers.Remove(server.ServerUri);
+                    }
+                }
+ 
+            }
+
+            ResponseHeader responseHeader = new ResponseHeader();
+
+            responseHeader.Timestamp = DateTime.UtcNow;
+            responseHeader.RequestHandle = requestHeader.RequestHandle;
+            responseHeader.ServiceResult = new StatusCode(StatusCodes.Good);
+
+
+            return responseHeader;
+
         }
 
         /// <summary>
@@ -204,7 +229,7 @@ namespace LightLDS
             endpoints.InsertRange(0, endpointsForHost);
 
             // create HTTPS host.
-#if !NO_HTTPS
+
             endpointsForHost = CreateHttpsServiceHost(
                 hosts,
                 configuration,
@@ -213,7 +238,6 @@ namespace LightLDS
                 configuration.ServerConfiguration.SecurityPolicies);
 
             endpoints.AddRange(endpointsForHost);
-#endif
             return new List<Task>(hosts.Values);
         }
 
