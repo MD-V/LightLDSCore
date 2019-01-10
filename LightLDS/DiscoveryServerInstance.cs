@@ -2,24 +2,41 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.Caching;
 using System.Threading.Tasks;
+using System.Timers;
 
 namespace LightLDS
 {
+    /// <summary>
+    /// The server instance
+    /// </summary>
     public class DiscoveryServerInstance : DiscoveryServerBase
     {
+        private const string _CacheName = "LocalDiscoveryServerCache";
+        private MemoryCache _Cache = new MemoryCache(_CacheName);
+        private readonly CacheItemPolicy _CacheItemPolicy;
 
-        private Dictionary<string, ApplicationDescription> _RegisteredServers = new Dictionary<string, ApplicationDescription>();
         private object _ServerLock = new object();
 
-
+        /// <summary>
+        /// Ctor
+        /// </summary>
+        public DiscoveryServerInstance()
+        {
+            // Set the server timeout
+            _CacheItemPolicy = new CacheItemPolicy()
+            {
+                SlidingExpiration = TimeSpan.FromSeconds(60)
+            };
+        }
 
         #region IDiscovery
         public override ResponseHeader FindServers(RequestHeader requestHeader, string endpointUrl, StringCollection localeIds, StringCollection serverUris, out ApplicationDescriptionCollection servers)
         {
-            lock(_ServerLock)
+            lock (_ServerLock)
             {
-                servers = new ApplicationDescriptionCollection(_RegisteredServers.Values);
+                servers = new ApplicationDescriptionCollection(_Cache.OfType<ApplicationDescription>());
 
                 ResponseHeader responseHeader = new ResponseHeader();
 
@@ -27,10 +44,8 @@ namespace LightLDS
                 responseHeader.RequestHandle = requestHeader.RequestHandle;
                 responseHeader.ServiceResult = new StatusCode(StatusCodes.Good);
 
-
                 return responseHeader;
             }
-
         }
 
         public override ResponseHeader FindServersOnNetwork(RequestHeader requestHeader, uint startingRecordId, uint maxRecordsToReturn, StringCollection serverCapabilityFilter, out DateTime lastCounterResetTime, out ServerOnNetworkCollection servers)
@@ -47,9 +62,6 @@ namespace LightLDS
         {
             endpoints = null;
 
-            //ValidateRequest(requestHeader);
-
-
             // filter by profile.
             IList<BaseAddress> baseAddresses = FilterByProfile(profileUris, BaseAddresses);
 
@@ -58,7 +70,6 @@ namespace LightLDS
                 endpointUrl,
                 baseAddresses,
                 localeIds);
-
 
             return CreateResponse(requestHeader, StatusCodes.Good);
         }
@@ -76,52 +87,37 @@ namespace LightLDS
 
         public override ResponseHeader RegisterServer(RequestHeader requestHeader, RegisteredServer server)
         {
-
             lock (_ServerLock)
             {
+                //Validation
+                if(server == null || string.IsNullOrEmpty(server.ServerUri))
+                {
+                    return CreateResponse(requestHeader, StatusCodes.Bad);
+                }
 
                 if (server.IsOnline)
                 {
                     var newServer = new ApplicationDescription()
                     {
-                        ApplicationName = server.ServerNames.First(),
+                        ApplicationName = server.ServerNames?.First(),
                         ApplicationUri = server.ServerUri,
                         ApplicationType = server.ServerType,
                         ProductUri = server.ProductUri,
                         DiscoveryUrls = server.DiscoveryUrls
                     };
-                           
 
-                    if(_RegisteredServers.ContainsKey(server.ServerUri))
-                    {
-                        _RegisteredServers[server.ServerUri] = newServer;
-                    }
-                    else
-                    {
-                        _RegisteredServers.Add(server.ServerUri, newServer);
-                    }
+                    var cacheItem = new CacheItem(server.ServerUri, newServer);
+                    _Cache.Set(cacheItem, _CacheItemPolicy);
 
-                    
+                    Console.WriteLine($"RegisteredServer: {server.ServerUri}");
                 }
                 else
                 {
-                    if (_RegisteredServers.ContainsKey(server.ServerUri))
-                    {
-                        _RegisteredServers.Remove(server.ServerUri);
-                    }
+                    _Cache.Remove(server.ServerUri);
                 }
- 
             }
 
-            ResponseHeader responseHeader = new ResponseHeader();
-
-            responseHeader.Timestamp = DateTime.UtcNow;
-            responseHeader.RequestHandle = requestHeader.RequestHandle;
-            responseHeader.ServiceResult = new StatusCode(StatusCodes.Good);
-
-
-            return responseHeader;
-
+            return CreateResponse(requestHeader, StatusCodes.Good);
         }
 
         /// <summary>
@@ -151,7 +147,7 @@ namespace LightLDS
                 // translate the application description.
                 ApplicationDescription application = TranslateApplicationDescription(
                     parsedEndpointUrl,
-                    base.ServerDescription,
+                    ServerDescription,
                     baseAddresses,
                     applicationName);
 
@@ -159,7 +155,7 @@ namespace LightLDS
                 endpoints = TranslateEndpointDescriptions(
                     parsedEndpointUrl,
                     baseAddresses,
-                    this.Endpoints,
+                    Endpoints,
                     application);
             }
 
@@ -229,7 +225,6 @@ namespace LightLDS
             endpoints.InsertRange(0, endpointsForHost);
 
             // create HTTPS host.
-
             endpointsForHost = CreateHttpsServiceHost(
                 hosts,
                 configuration,
@@ -240,7 +235,6 @@ namespace LightLDS
             endpoints.AddRange(endpointsForHost);
             return new List<Task>(hosts.Values);
         }
-
 
         protected override EndpointBase GetEndpointInstance(ServerBase server)
         {
