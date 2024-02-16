@@ -1,9 +1,9 @@
 # LightLDS
 
-This is a lightweight implementation of the OPC UA Local Discovery Server in .Net Core.
+This is a lightweight implementation of the OPC UA Local Discovery Server in .NET
 
-The OPC Foundation has its own reference implementation based on the ANSI C stack which is released an maintained by them.
-We had some stability issues with the reference implementation so I decided to take my own approach and implement the server with the .Net Standard stack.
+The OPC Foundation has its own reference implementation based on the ANSI C stack which is released and maintained by them.
+We had some stability issues with the reference implementation so I decided to take my own approach and implement the server with the .NET stack.
 
 ## Information
 
